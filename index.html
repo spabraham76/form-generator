@@ -32,15 +32,19 @@
     .btn-primary { background: #2563eb; color: #fff; }  .btn-primary:hover { background: #1d4ed8; }
     .btn-success { background: #059669; color: #fff; }  .btn-success:hover { background: #047857; }
     .btn-outline { background: #fff; color: #374151; border: 1px solid #d1d5db; } .btn-outline:hover { background: #f9fafb; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn.active { background: #1e40af; color: #fff; }
 
-    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .toolbar h2 { font-size: 18px; }
     .toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .hint { font-size: 13px; color: #6b7280; margin-bottom: 12px; }
+    .editbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: #f3f4f6; border-radius: 6px; font-size: 13px; }
+    .editbar .sep { width: 1px; height: 20px; background: #d1d5db; }
 
-    /* Pages & overlay fields */
     .page { position: relative; width: 100%; margin: 0 auto 24px; box-shadow: 0 2px 8px rgba(0,0,0,.15); background: #fff; }
-    .page img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+    .page img { display: block; width: 100%; height: auto; -webkit-user-drag: none; }
+    .page.addmode { cursor: crosshair; }
+
     .fld { position: absolute; }
     .fld input[type=text], .fld textarea {
       width: 100%; height: 100%; border: 1px dashed rgba(37,99,235,.7); background: rgba(37,99,235,.08);
@@ -50,9 +54,14 @@
     .fld.sig input { font-family: 'Brush Script MT', cursive; font-size: 18px; }
     .fld.chk { display: flex; align-items: center; justify-content: center; }
     .fld.chk input { width: 100%; height: 100%; max-width: 22px; max-height: 22px; margin: 0; cursor: pointer; }
-    .handle { position: absolute; top: -9px; left: -9px; width: 14px; height: 14px; background: #2563eb; border-radius: 50%; cursor: move; opacity: 0; transition: opacity .15s; }
-    .fld:hover .handle { opacity: 1; }
-    .fld.dragging { z-index: 10; }
+    .fld.selected input, .fld.selected textarea { border: 2px solid #dc2626 !important; background: rgba(220,38,38,.1) !important; }
+
+    .handle { position: absolute; width: 12px; height: 12px; background: #2563eb; border: 1px solid #fff; border-radius: 50%; opacity: 0; transition: opacity .12s; }
+    .fld:hover .handle, .fld.selected .handle { opacity: 1; }
+    .handle.move { top: -8px; left: -8px; cursor: move; }
+    .handle.resize { bottom: -8px; right: -8px; cursor: nwse-resize; background: #059669; }
+    .handle.del { top: -8px; right: -8px; cursor: pointer; background: #dc2626; width: 14px; height: 14px; color: #fff; font-size: 10px; line-height: 12px; text-align: center; }
+    .fld.dragging { z-index: 20; }
 
     .loading { text-align: center; padding: 56px; }
     .loading p { color: #6b7280; margin-top: 14px; }
@@ -66,7 +75,7 @@
       body { background: #fff; padding: 0; }
       .container { max-width: none; }
       .card { box-shadow: none; padding: 0; border-radius: 0; }
-      .page { box-shadow: none; margin: 0; page-break-after: always; width: 100%; }
+      .page { box-shadow: none; margin: 0; page-break-after: always; }
       .page:last-child { page-break-after: auto; }
       .fld input[type=text], .fld textarea { border: none !important; background: transparent !important; }
       .handle { display: none !important; }
@@ -107,12 +116,18 @@
     <div class="toolbar no-print">
       <h2>Fill in your form</h2>
       <div class="toolbar-actions">
-        <button class="btn btn-outline" onclick="resetApp()">⬆ Upload New Form</button>
-        <button class="btn btn-success" onclick="downloadWord()">⬇ Download as Word</button>
-        <button class="btn btn-primary" onclick="window.print()">🖨 Print / Save PDF</button>
+        <button class="btn btn-outline" onclick="resetApp()">⬆ Upload New</button>
+        <button class="btn btn-success" onclick="downloadWord()">⬇ Word</button>
+        <button class="btn btn-primary" onclick="window.print()">🖨 Print / PDF</button>
       </div>
     </div>
-    <p class="hint no-print">Tip: hover a field and drag the blue dot to reposition it if it's slightly off.</p>
+    <div class="editbar no-print">
+      <strong>Edit:</strong>
+      <button class="btn btn-outline btn-sm" id="addTextBtn" onclick="toggleAdd('text')">+ Text field</button>
+      <button class="btn btn-outline btn-sm" id="addCheckBtn" onclick="toggleAdd('checkbox')">+ Checkbox</button>
+      <span class="sep"></span>
+      <span id="editHint" style="color:#6b7280">Hover a field: drag <b style="color:#2563eb">blue</b> to move, <b style="color:#059669">green</b> to resize, <b style="color:#dc2626">×</b> to delete.</span>
+    </div>
     <div id="pages"></div>
   </div>
 
@@ -121,9 +136,9 @@
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   let currentFile = null;
-  let pages = [];   // [{ dataUrl, fields: [] }]
+  let pages = [];          // [{ dataUrl, fields:[], words:[] }]
+  let addMode = null;      // null | 'text' | 'checkbox'
 
-  // ── Upload handling ──────────────────────────────────────────────
   document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
   const dz = document.getElementById('dropZone');
   dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('dragover'); });
@@ -139,8 +154,8 @@
     hideError();
   }
 
-  // ── Convert file to page images ──────────────────────────────────
-  async function fileToPageImages(file) {
+  // Render PDF pages to images AND pull exact word positions (digital PDFs)
+  async function fileToPages(file) {
     if (file.type === 'application/pdf') {
       const buf = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
@@ -152,36 +167,50 @@
         const canvas = document.createElement('canvas');
         canvas.width = vp.width; canvas.height = vp.height;
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-        out.push(canvas.toDataURL('image/jpeg', 0.85));
+
+        // Extract word positions as % of page
+        const tc = await page.getTextContent();
+        const words = tc.items.filter(it => it.str && it.str.trim()).map(it => {
+          const tx = pdfjsLib.Util.transform(vp.transform, it.transform);
+          const x = tx[4], yTop = tx[5] - it.height * 2;
+          return {
+            t: it.str.trim(),
+            x: +(x / vp.width * 100).toFixed(2),
+            y: +(yTop / vp.height * 100).toFixed(2),
+            w: +(it.width * 2 / vp.width * 100).toFixed(2),
+            h: +(it.height * 2 / vp.height * 100).toFixed(2)
+          };
+        });
+        out.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.85), words });
       }
       return out;
     }
     if (file.type.startsWith('image/')) {
-      return [await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); })];
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      return [{ dataUrl, words: [] }];
     }
-    throw new Error('Unsupported file type. Please save Word documents as PDF first.');
+    throw new Error('Unsupported file type. Save Word documents as PDF first.');
   }
 
-  // ── Analyse ──────────────────────────────────────────────────────
   async function analyzeForm() {
     if (!currentFile) return;
     show('loadingSection'); hide('uploadSection'); hide('formSection'); hideError();
     try {
-      const imgs = await fileToPageImages(currentFile);
+      const raw = await fileToPages(currentFile);
       pages = [];
-      for (let i = 0; i < imgs.length; i++) {
-        setLoading(`Detecting fields on page ${i + 1} of ${imgs.length}…`);
-        const base64Data = imgs[i].split(',')[1];
+      for (let i = 0; i < raw.length; i++) {
+        setLoading(`Detecting fields on page ${i + 1} of ${raw.length}…`);
+        const base64Data = raw[i].dataUrl.split(',')[1];
         const res = await fetch('/api/analyze', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64Data, mediaType: 'image/jpeg' })
+          body: JSON.stringify({ base64Data, mediaType: 'image/jpeg', words: raw[i].words })
         });
         if (!res.ok) throw new Error(`Server error ${res.status}`);
         const data = await res.json();
         if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
         const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
         const fields = JSON.parse(text.replace(/```json|```/g, '').trim());
-        pages.push({ dataUrl: imgs[i], fields });
+        pages.push({ dataUrl: raw[i].dataUrl, fields, words: raw[i].words });
       }
       renderPages();
       hide('loadingSection'); show('formSection');
@@ -191,14 +220,13 @@
     }
   }
 
-  // ── Render pages with overlay fields ─────────────────────────────
   function renderPages() {
-    const wrap = document.getElementById('pages');
-    wrap.innerHTML = '';
+    const wrap = document.getElementById('pages'); wrap.innerHTML = '';
     pages.forEach((p, pi) => {
-      const pg = document.createElement('div'); pg.className = 'page';
+      const pg = document.createElement('div'); pg.className = 'page'; pg.dataset.pi = pi;
       const img = document.createElement('img'); img.src = p.dataUrl; pg.appendChild(img);
       p.fields.forEach((f, fi) => pg.appendChild(buildField(f, pi, fi)));
+      pg.addEventListener('click', e => { if (addMode && e.target === img) addFieldAt(e, pi); });
       wrap.appendChild(pg);
     });
   }
@@ -206,39 +234,65 @@
   function buildField(f, pi, fi) {
     const d = document.createElement('div');
     d.className = 'fld' + (f.type === 'checkbox' ? ' chk' : f.type === 'signature' ? ' sig' : '');
-    d.style.left = f.x + '%'; d.style.top = f.y + '%';
-    d.style.width = f.w + '%'; d.style.height = f.h + '%';
+    d.style.left = f.x + '%'; d.style.top = f.y + '%'; d.style.width = f.w + '%'; d.style.height = f.h + '%';
     d.title = f.label || '';
     const id = `p${pi}f${fi}`;
-    if (f.type === 'checkbox') {
-      d.innerHTML = `<input type="checkbox" id="${id}">`;
-    } else if (f.type === 'textarea') {
-      d.innerHTML = `<textarea id="${id}"></textarea>`;
-    } else {
-      d.innerHTML = `<input type="text" id="${id}">`;
-    }
-    const h = document.createElement('div'); h.className = 'handle'; d.appendChild(h);
-    makeDraggable(d, h, f);
+    if (f.type === 'checkbox') d.innerHTML = `<input type="checkbox" id="${id}">`;
+    else if (f.type === 'textarea') d.innerHTML = `<textarea id="${id}"></textarea>`;
+    else d.innerHTML = `<input type="text" id="${id}">`;
+
+    const mv = mkHandle('move'); const rz = mkHandle('resize'); const dl = mkHandle('del'); dl.textContent = '×';
+    d.append(mv, rz, dl);
+    dragMove(d, mv, f); dragResize(d, rz, f);
+    dl.addEventListener('click', ev => { ev.stopPropagation(); pages[pi].fields.splice(fi, 1); renderPages(); });
+    d.addEventListener('click', ev => { ev.stopPropagation(); document.querySelectorAll('.fld.selected').forEach(x => x.classList.remove('selected')); d.classList.add('selected'); });
     return d;
   }
+  function mkHandle(kind) { const h = document.createElement('div'); h.className = 'handle ' + kind; return h; }
 
-  function makeDraggable(el, handle, f) {
+  function dragMove(el, handle, f) {
     handle.addEventListener('mousedown', e => {
-      e.preventDefault();
-      const page = el.parentElement, rect = page.getBoundingClientRect();
-      const startX = e.clientX, startY = e.clientY, startL = f.x, startT = f.y;
+      e.preventDefault(); e.stopPropagation();
+      const rect = el.parentElement.getBoundingClientRect();
+      const sx = e.clientX, sy = e.clientY, sl = f.x, st = f.y;
+      el.classList.add('dragging');
+      const move = ev => { f.x = sl + (ev.clientX - sx) / rect.width * 100; f.y = st + (ev.clientY - sy) / rect.height * 100; el.style.left = f.x + '%'; el.style.top = f.y + '%'; };
+      const up = () => { el.classList.remove('dragging'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+  }
+  function dragResize(el, handle, f) {
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const rect = el.parentElement.getBoundingClientRect();
+      const sx = e.clientX, sy = e.clientY, sw = f.w, sh = f.h;
       el.classList.add('dragging');
       const move = ev => {
-        f.x = startL + (ev.clientX - startX) / rect.width * 100;
-        f.y = startT + (ev.clientY - startY) / rect.height * 100;
-        el.style.left = f.x + '%'; el.style.top = f.y + '%';
+        f.w = Math.max(1, sw + (ev.clientX - sx) / rect.width * 100);
+        f.h = Math.max(1, sh + (ev.clientY - sy) / rect.height * 100);
+        el.style.width = f.w + '%'; el.style.height = f.h + '%';
       };
       const up = () => { el.classList.remove('dragging'); document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
   }
 
-  // ── Word export (page images + filled values table) ──────────────
+  function toggleAdd(kind) {
+    addMode = addMode === kind ? null : kind;
+    document.getElementById('addTextBtn').classList.toggle('active', addMode === 'text');
+    document.getElementById('addCheckBtn').classList.toggle('active', addMode === 'checkbox');
+    document.querySelectorAll('.page').forEach(pg => pg.classList.toggle('addmode', !!addMode));
+    document.getElementById('editHint').textContent = addMode ? `Click on the form to place a ${addMode}.` : 'Hover a field: drag blue to move, green to resize, × to delete.';
+  }
+  function addFieldAt(e, pi) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * 100;
+    const y = (e.clientY - rect.top) / rect.height * 100;
+    const f = addMode === 'checkbox' ? { label: 'Checkbox', type: 'checkbox', x: x - 1, y: y - 1, w: 2, h: 1.6 }
+                                     : { label: 'Field', type: 'text', x, y: y - 1.2, w: 25, h: 2.4 };
+    pages[pi].fields.push(f); toggleAdd(addMode); renderPages();
+  }
+
   function downloadWord() {
     let body = '';
     pages.forEach((p, pi) => {
@@ -246,9 +300,7 @@
       let rows = '';
       p.fields.forEach((f, fi) => {
         const el = document.getElementById(`p${pi}f${fi}`);
-        let val = '';
-        if (f.type === 'checkbox') val = el && el.checked ? '☑' : '☐';
-        else val = el ? el.value : '';
+        let val = f.type === 'checkbox' ? (el && el.checked ? '☑' : '') : (el ? el.value : '');
         if (val) rows += `<tr><td style="padding:6px 10px;border:1px solid #ccc;font-weight:bold;width:40%">${esc(f.label || '')}</td><td style="padding:6px 10px;border:1px solid #ccc">${esc(val)}</td></tr>`;
       });
       if (rows) body += `<h3 style="margin:12px 0 6px">Page ${pi + 1} — entered values</h3><table style="width:100%;border-collapse:collapse">${rows}</table>`;
@@ -260,15 +312,14 @@
     a.click(); URL.revokeObjectURL(a.href);
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────
   function resetApp() {
-    currentFile = null; pages = [];
+    currentFile = null; pages = []; addMode = null;
     document.getElementById('fileInput').value = '';
     document.getElementById('fileBar').style.display = 'none';
     document.getElementById('pages').innerHTML = '';
     hide('formSection'); hide('loadingSection'); show('uploadSection'); hideError();
   }
-  function setLoading(msg) { document.getElementById('loadingMsg').textContent = msg; }
+  function setLoading(m) { document.getElementById('loadingMsg').textContent = m; }
   function show(id) { document.getElementById(id).style.display = 'block'; }
   function hide(id) { document.getElementById(id).style.display = 'none'; }
   function showError(m) { const el = document.getElementById('errorBanner'); el.textContent = m; el.style.display = 'block'; }
